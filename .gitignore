@@ -1,0 +1,17 @@
+# Real environment values — contains tenancy OCIDs and instance hostnames
+SA_ENV.sql
+
+# SQL*Plus / SQLcl output
+*.lst
+*.log
+*.spool
+
+# Agent Builder runtime
+agent-builder/agent_builder_config.ini
+agent-builder/logs/*
+!agent-builder/logs/.gitkeep
+agent-builder/projects/*
+!agent-builder/projects/.gitkeep
+
+# macOS
+.DS_Store

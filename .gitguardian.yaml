@@ -1,0 +1,26 @@
+version: 2
+
+# GitGuardian / ggshield configuration for this repository.
+#
+# Every script here is parameterised with SQLcl substitution variables, which
+# use a caret prefix (SET DEFINE '^'). A line such as
+#
+#     password => '^schema_pw.'
+#
+# is a *variable reference*, not a credential — the value is supplied at run
+# time from SA_ENV.sql, which is gitignored and never committed. The generic
+# password detector cannot tell the two apart, so the match below is recorded
+# as an accepted false positive rather than silenced with SKIP=ggshield.
+#
+# No real password, key, OCID or token belongs in this repository. If a new
+# finding appears, check it properly before adding it here.
+
+secret:
+  ignored_matches:
+    - name: "SA_03_agent_setup.sql — SQLcl substitution variable '^schema_pw.', not a credential"
+      match: 8ead63573ec3dae4dbffebd5aeeb171c1753eb3f8e158ed3f1fa04e1cd5b41f0
+
+  ignored_paths:
+    # Local, gitignored config that holds real values. Listed defensively so a
+    # stray copy is never scanned or committed.
+    - "SA_ENV.sql"

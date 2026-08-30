@@ -1,0 +1,112 @@
+--------------------------------------------------------------------------------
+--  SA_ENV.sql  --  environment settings for the ACME Select AI Agent scripts
+--------------------------------------------------------------------------------
+--  SETUP:  cp SA_ENV.sql.template SA_ENV.sql   then edit the values below.
+--          SA_ENV.sql is gitignored. This template is the only version committed.
+--
+--  Every other script starts with  @SA_ENV  and refers to these as &variables,
+--  so this is the only file you edit. Works in SQLcl, SQL*Plus, and Database
+--  Actions in the OCI console -- no external tooling.
+--
+--  NO PASSWORDS HERE. Scripts that need one prompt for it at run time with
+--  ACCEPT ... HIDE, so it never lands in a file, a spool, or shell history.
+--
+--  See CHECKLIST.md for where each value comes from.
+--------------------------------------------------------------------------------
+
+SET VERIFY OFF
+-- Substitution character is caret, not ampersand, so that literal
+-- ampersands in data (P and L reports, FP and A Team) are left alone.
+-- NOTE: this comment deliberately spells out 'and' -- an ampersand on
+-- the SET DEFINE line itself is parsed BEFORE the setting takes effect,
+-- which silently discards the whole line.
+SET DEFINE '^'
+
+-- ── Schema ───────────────────────────────────────────────────────────────────
+-- The schema that owns the agent objects and the ACME data.
+DEFINE agent_schema     = "ACME_CORP"
+
+-- ── OCI ──────────────────────────────────────────────────────────────────────
+-- Region of your Autonomous Database, e.g. us-ashburn-1, us-chicago-1.
+-- OCI Generative AI is NOT available in every region, and model availability
+-- differs between the regions where it is. Verify before you rely on this.
+DEFINE region           = "us-ashburn-1"
+
+-- Compartment holding the database. Console > Identity > Compartments > OCID.
+-- Only needed explicitly when your GenAI resources are in a DIFFERENT
+-- compartment from the database; otherwise the database's own compartment is
+-- the default. Setting it always is harmless and avoids a confusing ORA-20052.
+DEFINE compartment_ocid = "ocid1.compartment.oc1..xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+-- ── LLM ──────────────────────────────────────────────────────────────────────
+-- Must exist in ^region. List them with:
+--   oci generative-ai model-collection list-models -c <compartment-ocid>
+-- Prefer a reasoning/instruct model. Fast non-reasoning models truncate long
+-- structured output regardless of max_tokens, which breaks SQL interpretation.
+DEFINE chat_model       = "meta.llama-4-maverick-17b-128e-instruct-fp8"
+DEFINE embed_model      = "cohere.embed-multilingual-v3.0"
+
+-- Profile tuning. max_tokens defaults to 1024 if unset, which is far too low
+-- once the agent is interpreting, generating SQL, and narrating a result.
+DEFINE nl2sql_temp      = "0.1"
+DEFINE rag_temp         = "0.3"
+DEFINE max_tokens       = "8000"
+
+-- ── Object Storage (RAG) ─────────────────────────────────────────────────────
+-- Namespace: Console > Tenancy details, or:  oci os ns get
+DEFINE os_namespace     = "xxxxxxxxxxxx"
+DEFINE rag_bucket       = "acme-kb"
+DEFINE rag_prefix       = "policy-kb"
+
+-- Derived -- do not edit. The doubled dot after a variable terminates its name,
+-- so these stay in step with the values above automatically.
+DEFINE rag_location_url = "https://objectstorage.^region..oraclecloud.com/n/^os_namespace./b/^rag_bucket./o/^rag_prefix./"
+
+-- ── OML4Py / Embedded Python Execution ───────────────────────────────────────
+-- Only needed for the Python custom tool. Skip if you are not using it.
+--
+-- pyqAppendHostAce takes the ROOT DOMAIN, not the instance hostname. Oracle
+-- expands it and stores the full hostname -- so what pyqGetHostAce returns will
+-- look different from what you passed in. That is correct, not a bug.
+DEFINE oml_root_domain  = "adb.^region..oraclecloudapps.com"
+
+-- Full OML REST endpoint for THIS database, used by the Python tool's token
+-- refresh. Console > ADB > Database Actions > Oracle Machine Learning RESTful
+-- Services, or:  oci db autonomous-database get --autonomous-database-id <ocid>
+--                  --query 'data."connection-urls"."machine-learning-user-management-url"'
+DEFINE oml_base_url     = "https://XXXXXXXXXXXX-YOURDBNAME.adb.^region..oraclecloudapps.com"
+
+-- OCI Vault secret holding the schema password. The database fetches this
+-- itself at run time via Resource Principal, so no password is ever stored in
+-- these scripts. Needs: allow any-user to read secret-bundles in compartment <c>
+--                       where request.principal.type = 'autonomousdatabase'
+DEFINE vault_secret_ocid = "ocid1.vaultsecret.oc1.REPLACE_ME"
+
+-- DBMS_CLOUD credential holding the schema password, used by the Python tool.
+DEFINE oml_credential   = "ACME_OML_CRED"
+
+-- ── Object names ─────────────────────────────────────────────────────────────
+-- Change the prefix to rebrand the whole stack in one place.
+DEFINE obj_prefix       = "ACME"
+DEFINE nl2sql_profile   = "^obj_prefix._NL2SQL_PROFILE"
+DEFINE rag_profile      = "^obj_prefix._RAG_PROFILE"
+DEFINE vector_index     = "^obj_prefix._VECTOR_INDEX"
+DEFINE sql_tool         = "^obj_prefix._SQL_TOOL"
+DEFINE rag_tool         = "^obj_prefix._RAG_TOOL"
+DEFINE agent_name       = "^obj_prefix._ANALYST"
+DEFINE task_name        = "^obj_prefix._ANALYST_TASK"
+DEFINE team_name        = "^obj_prefix._ANALYST_TEAM"
+DEFINE error_log_table  = "^obj_prefix._ERROR_LOG"
+
+PROMPT
+PROMPT ============================================================
+PROMPT  SA_ENV loaded
+PROMPT ============================================================
+PROMPT  schema      : ^agent_schema
+PROMPT  region      : ^region
+PROMPT  chat model  : ^chat_model
+PROMPT  embed model : ^embed_model
+PROMPT  RAG source  : ^rag_location_url
+PROMPT  team        : ^team_name
+PROMPT ============================================================
+PROMPT
