@@ -44,6 +44,8 @@ BEGIN
           elapsed_ms    NUMBER,
           tools_fired   VARCHAR2(400),
           team_exec_id  VARCHAR2(80),
+          attempts      NUMBER DEFAULT 1,   -- cases may be sampled more than once
+          pass_count    NUMBER,             -- how many of those attempts held
           CONSTRAINT acme_eval_results_pk PRIMARY KEY (run_id, case_id)
         )');
 

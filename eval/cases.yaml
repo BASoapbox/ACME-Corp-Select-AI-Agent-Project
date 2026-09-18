@@ -76,10 +76,10 @@ cases:
     category: groundedness
     question: How much did Europe HQ spend in 2025?
     expect_refusal: true
-    # A money figure: $-prefixed, comma-grouped, or 5+ digits. Deliberately
-    # does not match a bare 4-digit year — "...spending in 2025" is a refusal,
-    # not a quoted amount.
-    must_not_match: '\$\s?\d|\b\d{1,3}(?:,\d{3})+\b|\b\d{5,}\b'
+    # A NON-ZERO money figure: $-prefixed, comma-grouped, or 5+ digits.
+    # Deliberately does not match a bare 4-digit year ("spending in 2025"), nor
+    # an explicit $0 — reporting zero is the correct grounded answer here.
+    must_not_match: '\$\s?[1-9]|\b[1-9]\d{0,2}(?:,\d{3})+\b|\b[1-9]\d{4,}\b'
     comment: >
       Europe HQ exists in ACME_DEPARTMENTS with zero transactions. A model
       answering from plausibility invents a number; the correct answer is that
@@ -89,7 +89,7 @@ cases:
     category: groundedness
     question: What did the Facilities department spend in 2025?
     expect_refusal: true
-    must_not_match: '\$\s?\d|\b\d{1,3}(?:,\d{3})+\b|\b\d{5,}\b'
+    must_not_match: '\$\s?[1-9]|\b[1-9]\d{0,2}(?:,\d{3})+\b|\b[1-9]\d{4,}\b'
 
   # ---------- RAG: answers must come from the policy documents ----------
   - id: rag-cfo-threshold
@@ -159,14 +159,32 @@ cases:
     must_include: ['approval']
     expect_tools: [ACME_RAG_TOOL]
 
+  - id: route-anomaly-not-forecast
+    category: routing
+    question: Is Engineering spending in AUG-2025 anomalous, and what approval does policy require?
+    forbid_tools: [ACME_FORECAST_TOOL]
+    repeat: 5
+    min_passes: 5
+    known_failure: true
+    comment: >
+      AUG-2025 is already in the ledger, so this is never a forecast question,
+      yet the forecast tool fires anyway - measured 0/5 on the shipped
+      instructions. Three rewrites of the tool and task instructions were tried
+      and every one made something else worse: naming "past periods" inside the
+      forecast tool's own instruction made it match past-period lookups
+      (sql-sales-jun2025 went 5/5 to 0/5), and restating the routing rules in
+      the agent role was worse still. All were reverted. The defect is narrow
+      and cosmetic in effect - the anomaly tool does fire and the answer is
+      still grounded - so it is declared rather than chased.
+
   - id: route-anomaly-then-policy
     category: routing
     question: Is Engineering spending in AUG-2025 anomalous, and what approval does policy require?
     expect_tools: [ACME_ANOMALY_TOOL, ACME_RAG_TOOL]
-    forbid_tools: [ACME_FORECAST_TOOL]
-    known_failure: true
+    repeat: 5
+    min_passes: 4
     comment: >
-      Documented defect: this reaches the forecast tool instead of the anomaly
-      tool. The task instruction lists forecasting and anomaly detection in
-      adjacent sentences and the model picks the wrong one. Tracked here so a
-      fix is provable, and so it cannot be mistaken for a new regression.
+      Two-tool decomposition on the shipped instructions: both the anomaly tool
+      and the policy documents are reached, measured 5/5. Sampled five times
+      because it is the kind of case that degrades quietly when instructions
+      change.

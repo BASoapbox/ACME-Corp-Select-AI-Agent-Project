@@ -28,8 +28,9 @@ failing — so it can gate a pipeline.
 | `expect_tools` / `forbid_tools` | which tools must and must not have run |
 | `max_seconds` | wall-clock budget |
 | `known_failure` | a documented defect, counted separately |
+| `repeat` / `min_passes` | sample the case N times; require M to hold |
 
-Three of these are the point of the harness.
+Four of these are the point of the harness.
 
 **Ground truth is computed, not hard-coded.** A case carries the SQL that
 produces the expected answer, and the harness runs it at evaluation time:
@@ -72,6 +73,21 @@ quote a figure:
   must_not_match: '\$?\d[\d,]{3,}'
 ```
 
+**A flaky case is a measurement, not a coin toss.** Re-running until a case
+agrees with you is how a suite stops meaning anything. `repeat` samples a case
+and `min_passes` sets the bar, so the recorded number is the real reliability:
+
+```yaml
+- id: route-anomaly-then-policy
+  expect_tools: [ACME_ANOMALY_TOOL, ACME_RAG_TOOL]
+  repeat: 5
+  min_passes: 4
+```
+
+```
+[KNOWN] route-anomaly-then-policy   4/5   14.9s  ACME_SQL_TOOL, ACME_RAG_TOOL, …
+```
+
 ---
 
 ## Runs are stored
@@ -99,10 +115,30 @@ which were fixed since the last run.
 
 `known_failure: true` marks a case that is currently broken and understood. It
 is reported separately and does not set the exit code, so a defect you have
-already accepted cannot hide one you have not. One case carries it today:
-a question needing the anomaly tool followed by the policy documents reaches
-the forecast tool instead, because the task instruction lists forecasting and
-anomaly detection in adjacent sentences.
+already accepted cannot hide one you have not.
+
+One case carries it today. `route-anomaly-not-forecast` asks whether AUG-2025
+spending was anomalous — a period already in the ledger, so never a forecast
+question — and the forecast tool fires anyway, 0/5.
+
+The attempt to fix it is the reason the flag exists. Three rewrites were tried,
+in place with `DBMS_CLOUD_AI_AGENT.SET_ATTRIBUTE`, and the harness caught each
+one making something else worse:
+
+| Change | Effect |
+|---|---|
+| Task instruction: explicit "anomalous ⇒ ANOMALY, never FORECAST" | routing 0/3 → 4/5 |
+| Forecast tool: added "never use for a period that already exists" | **plain lookups broke** — `sql-sales-jun2025` 5/5 → 0/5, answered with a forecast |
+| Forecast tool reworded positively, exclusions moved to the task | lookups recovered, routing fell to 2/5 |
+| Routing rules restated in the agent role as well | worst of all — lookups 0/5 |
+
+Naming "past periods" inside the forecast tool's own instruction, even to forbid
+them, made that tool match past-period questions. All of it was reverted, and
+the deployed instructions are the ones in `SA_03_agent_setup.sql`.
+
+The defect is narrow: the anomaly tool does fire and the answer stays grounded,
+so the extra call is cosmetic. It is declared rather than chased — and the
+measurements above exist because each attempt was scored rather than eyeballed.
 
 ---
 

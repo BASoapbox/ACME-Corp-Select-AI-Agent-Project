@@ -151,9 +151,14 @@ def ground_truth(conn, sql: str) -> str:
 # Scoring
 # ─────────────────────────────────────────────────────────────────────────────
 
+# An explicit zero counts as a refusal: "Europe HQ spent $0" came from running
+# the query and getting nothing, which is the behaviour being tested. What must
+# never appear is an invented non-zero figure.
 REFUSAL = re.compile(
-    r"\b(no data|not found|no records|no transactions|does not (?:exist|have)|"
-    r"there (?:is|are) no|unable to|cannot find|no information|not available)\b", re.I)
+    r"\bno (?:data|records?|transactions?|information|expenses?|spend(?:ing)?|"
+    r"results?|activity)\b|\bnot found\b|\bdoes not (?:exist|have)\b|"
+    r"\bthere (?:is|are) no\b|\bunable to\b|\bcannot find\b|"
+    r"\bnot available\b|\bzero\b|\$\s?0(?:\.00)?\b|\bis 0\b", re.I)
 
 
 def _number_variants(value: str) -> list[str]:
@@ -239,12 +244,14 @@ def store(conn, run_id, team, results, started, notes):
     cur.executemany("""
         INSERT INTO acme_eval_results
           (run_id, case_id, category, question, answer, passed, known_failure,
-           failures, elapsed_ms, tools_fired, team_exec_id)
-        VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11)""",
+           failures, elapsed_ms, tools_fired, team_exec_id, attempts, pass_count)
+        VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13)""",
         [[run_id, r["id"], r["category"], r["question"][:1000], r["answer"],
           "Y" if r["passed"] else "N", "Y" if r["known_failure"] else "N",
           "; ".join(r["failures"])[:4000], r["elapsed_ms"],
-          ", ".join(r["tools"])[:400], r["team_exec_id"]] for r in results])
+          ", ".join(r["tools"])[:400], r["team_exec_id"],
+          r.get("attempts", 1), r.get("pass_count", 1 if r["passed"] else 0)]
+         for r in results])
     conn.commit()
 
 
@@ -308,28 +315,49 @@ def main() -> int:
     results = []
     for case in cases:
         merged = {**defaults, **case}
-        try:
-            answer, eid, ms = ask(conn, team, merged["question"])
-            fired = tools_fired(conn, eid) if eid else []
-            truth = ground_truth(conn, merged["verify_sql"]) if merged.get("verify_sql") else None
-            fails = score(merged, answer, fired, ms, truth)
-        except Exception as ex:
-            answer, eid, ms, fired, truth = f"ERROR: {ex}", None, 0, [], None
-            fails = [f"execution failed: {str(ex).splitlines()[0][:120]}"]
+        # A flaky case is a fact about the system, not a coin toss to re-flip
+        # until it agrees with you. `repeat` samples it N times and `min_passes`
+        # says how many must hold; the recorded pass rate is the finding.
+        attempts = max(1, int(merged.get("repeat", 1)))
+        need = int(merged.get("min_passes", attempts))
+        tries = []
+        for _ in range(attempts):
+            try:
+                answer, eid, ms = ask(conn, team, merged["question"])
+                fired = tools_fired(conn, eid) if eid else []
+                truth = (ground_truth(conn, merged["verify_sql"])
+                         if merged.get("verify_sql") else None)
+                fails = score(merged, answer, fired, ms, truth)
+            except Exception as ex:
+                answer, eid, ms, fired, truth = f"ERROR: {ex}", None, 0, [], None
+                fails = [f"execution failed: {str(ex).splitlines()[0][:120]}"]
+            tries.append({"answer": answer, "eid": eid, "ms": ms,
+                          "tools": fired, "fails": fails, "truth": truth})
+
+        good = [t for t in tries if not t["fails"]]
+        passed = len(good) >= need
+        shown = (good[0] if good else
+                 sorted(tries, key=lambda t: len(t["fails"]))[0])
+        fails = [] if passed else shown["fails"]
+        if attempts > 1 and not passed:
+            fails = [f"{len(good)}/{attempts} attempts passed, needed {need}"] + fails
 
         rec = {"id": merged["id"], "category": merged.get("category", ""),
-               "question": merged["question"], "answer": answer,
-               "passed": not fails, "known_failure": bool(merged.get("known_failure")),
-               "failures": fails, "elapsed_ms": ms, "tools": fired,
-               "team_exec_id": eid, "truth": truth}
+               "question": merged["question"], "answer": shown["answer"],
+               "passed": passed, "known_failure": bool(merged.get("known_failure")),
+               "failures": fails, "elapsed_ms": max(t["ms"] for t in tries),
+               "tools": shown["tools"], "team_exec_id": shown["eid"],
+               "truth": shown["truth"], "attempts": attempts, "pass_count": len(good)}
         results.append(rec)
 
-        mark = "PASS" if not fails else ("KNOWN" if rec["known_failure"] else "FAIL")
-        print(f"  [{mark:5}] {merged['id']:34} {ms/1000:5.1f}s  {', '.join(fired) or '-'}")
+        mark = "PASS" if passed else ("KNOWN" if rec["known_failure"] else "FAIL")
+        rate = f" {len(good)}/{attempts}" if attempts > 1 else ""
+        print(f"  [{mark:5}] {merged['id']:34}{rate:5} "
+              f"{rec['elapsed_ms']/1000:5.1f}s  {', '.join(shown['tools']) or '-'}")
         if fails and not args.quiet:
             for f in fails:
                 print(f"           → {f}")
-            print(f"           answer: {answer[:150].replace(chr(10), ' ')}")
+            print(f"           answer: {shown['answer'][:150].replace(chr(10), ' ')}")
 
     passed = sum(1 for r in results if r["passed"])
     known  = sum(1 for r in results if r["known_failure"] and not r["passed"])
