@@ -150,6 +150,33 @@ FROM   user_ai_agent_tool_history
 ORDER  BY start_date DESC FETCH FIRST 10 ROWS ONLY;
 ```
 
+### Testing it repeatably
+
+Spot checks stop scaling once you start changing instructions and models.
+`eval/` holds a small evaluation harness: a fixed set of cases, a scorer, and a
+record of every run in the database.
+
+```bash
+cd eval
+cp eval.ini.template eval.ini      # no passwords in this file
+python run_eval.py
+```
+
+```
+[PASS ] sql-engineering-aug2025              5.6s  ACME_SQL_TOOL
+[PASS ] refusal-empty-department             6.2s  ACME_SQL_TOOL
+[KNOWN] route-anomaly-then-policy           10.9s  ACME_SQL_TOOL, ACME_RAG_TOOL, …
+         → ACME_FORECAST_TOOL fired and should not have
+
+15/16 passed   (1 known failure, 0 unexpected)
+```
+
+It asserts more than the wording of an answer. Expected figures are computed by
+SQL at run time, so they cannot go stale. Tool attribution is exact, using the
+`team_exec_id` that `RUN_TEAM` returns. A question about a department with no
+rows must be refused rather than answered. Known defects are declared, so one
+you have accepted cannot hide one you have not. See `eval/README.md`.
+
 ---
 
 ## When something fails

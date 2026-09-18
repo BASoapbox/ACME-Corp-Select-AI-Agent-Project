@@ -1,0 +1,172 @@
+# Evaluation cases for the ACME Select AI Agent.
+#
+# Scoring is deliberately not "does the text look right". Each case can assert:
+#
+#   verify_sql       SQL returning the ground truth. The answer must contain that
+#                    value. Because the expected figure is computed at run time,
+#                    the case never goes stale when the data changes.
+#   must_include     every string must appear (case-insensitive)
+#   must_not_match   regex that must NOT appear
+#   expect_refusal   the answer must decline rather than produce a figure
+#   expect_tools     every tool listed must have fired for this exact run
+#   forbid_tools     none of these may have fired
+#   max_seconds      wall-clock budget
+#   known_failure    documented current defect; counted separately so it does not
+#                    hide a NEW regression
+#
+# Tool attribution is exact: RUN_TEAM returns a team_exec_id and
+# USER_AI_AGENT_TOOL_HISTORY records it, so there is no time-window guessing.
+
+defaults:
+  max_seconds: 30
+
+cases:
+
+  # ---------- SQL: figures that must come from the ledger ----------
+  - id: sql-engineering-aug2025
+    category: sql
+    question: What were total Engineering expenses in August 2025?
+    verify_sql: |
+      SELECT TO_CHAR(SUM(t.debit_amount))
+      FROM   acme_gl_transactions t
+      JOIN   acme_departments d ON d.department_code = t.department_code
+      WHERE  d.department_name = 'Engineering' AND t.period_name = 'AUG-2025'
+    expect_tools: [ACME_SQL_TOOL]
+
+  - id: sql-sales-jun2025
+    category: sql
+    question: What were total Sales expenses in June 2025?
+    verify_sql: |
+      SELECT TO_CHAR(SUM(t.debit_amount))
+      FROM   acme_gl_transactions t
+      JOIN   acme_departments d ON d.department_code = t.department_code
+      WHERE  d.department_name = 'Sales' AND t.period_name = 'JUN-2025'
+    expect_tools: [ACME_SQL_TOOL]
+
+  - id: sql-lines-aug2025
+    category: sql
+    question: How many journal lines posted in AUG-2025?
+    verify_sql: |
+      SELECT TO_CHAR(COUNT(*)) FROM acme_gl_transactions WHERE period_name = 'AUG-2025'
+    expect_tools: [ACME_SQL_TOOL]
+
+  - id: sql-top-department-q3
+    category: sql
+    question: Which department spent the most between July and September 2025?
+    verify_sql: |
+      SELECT department_name FROM (
+        SELECT d.department_name
+        FROM   acme_gl_transactions t
+        JOIN   acme_departments d ON d.department_code = t.department_code
+        WHERE  t.period_name IN ('JUL-2025','AUG-2025','SEP-2025')
+        GROUP  BY d.department_name
+        ORDER  BY SUM(t.debit_amount) DESC)
+      WHERE ROWNUM = 1
+    expect_tools: [ACME_SQL_TOOL]
+
+  - id: sql-period-count
+    category: sql
+    question: How many distinct accounting periods are in the general ledger?
+    verify_sql: |
+      SELECT TO_CHAR(COUNT(DISTINCT period_name)) FROM acme_gl_transactions
+    expect_tools: [ACME_SQL_TOOL]
+
+  # ---------- Groundedness: the agent must refuse, not invent ----------
+  - id: refusal-empty-department
+    category: groundedness
+    question: How much did Europe HQ spend in 2025?
+    expect_refusal: true
+    # A money figure: $-prefixed, comma-grouped, or 5+ digits. Deliberately
+    # does not match a bare 4-digit year — "...spending in 2025" is a refusal,
+    # not a quoted amount.
+    must_not_match: '\$\s?\d|\b\d{1,3}(?:,\d{3})+\b|\b\d{5,}\b'
+    comment: >
+      Europe HQ exists in ACME_DEPARTMENTS with zero transactions. A model
+      answering from plausibility invents a number; the correct answer is that
+      there is no data.
+
+  - id: refusal-absent-department
+    category: groundedness
+    question: What did the Facilities department spend in 2025?
+    expect_refusal: true
+    must_not_match: '\$\s?\d|\b\d{1,3}(?:,\d{3})+\b|\b\d{5,}\b'
+
+  # ---------- RAG: answers must come from the policy documents ----------
+  - id: rag-cfo-threshold
+    category: rag
+    question: Which transactions require CFO sign-off?
+    must_include: ['50,000']
+    expect_tools: [ACME_RAG_TOOL]
+
+  - id: rag-close-checklist
+    category: rag
+    question: What are the steps in the period close checklist?
+    must_include: ['Fusion', 'reconciliation', 'approval']
+    expect_tools: [ACME_RAG_TOOL]
+
+  # ---------- Custom tools: the right tool must do the work ----------
+  - id: tool-anomaly-threshold
+    category: tools
+    question: Which periods show unusual spending above a 30 percent threshold?
+    must_include: ['Engineering', 'AUG-2025']
+    expect_tools: [ACME_ANOMALY_TOOL]
+
+  - id: tool-forecast-engineering
+    category: tools
+    question: Forecast Engineering spend for the next three periods.
+    must_match: '\d[\d,]*\.?\d*'
+    expect_tools: [ACME_FORECAST_TOOL]
+
+  - id: tool-trend-engineering
+    category: tools
+    question: How have Engineering expenses trended over the last six periods?
+    expect_tools: [ACME_TREND_TOOL]
+
+  - id: tool-python-stddev-engineering
+    category: tools
+    question: Give me the standard deviation and peak period for Engineering.
+    verify_sql: |
+      SELECT TO_CHAR(ROUND(STDDEV_POP(total), 2)) FROM (
+        SELECT SUM(t.debit_amount) AS total
+        FROM   acme_gl_transactions t
+        JOIN   acme_departments d ON d.department_code = t.department_code
+        WHERE  d.department_name = 'Engineering'
+        GROUP  BY t.period_name)
+    must_include: ['AUG-2025']
+    expect_tools: [ACME_PYTHON_TOOL]
+    max_seconds: 120
+    comment: >
+      numpy.std is the population standard deviation, so the SQL ground truth
+      must use STDDEV_POP and not STDDEV.
+
+  - id: tool-python-stddev-sales
+    category: tools
+    question: Give me the standard deviation and peak period for Sales.
+    verify_sql: |
+      SELECT TO_CHAR(ROUND(STDDEV_POP(total), 2)) FROM (
+        SELECT SUM(t.debit_amount) AS total
+        FROM   acme_gl_transactions t
+        JOIN   acme_departments d ON d.department_code = t.department_code
+        WHERE  d.department_name = 'Sales'
+        GROUP  BY t.period_name)
+    expect_tools: [ACME_PYTHON_TOOL]
+    max_seconds: 120
+
+  # ---------- Routing: questions needing two tools in sequence ----------
+  - id: route-overspend-policy
+    category: routing
+    question: Engineering is over budget - what does policy say about overspend approval?
+    must_include: ['approval']
+    expect_tools: [ACME_RAG_TOOL]
+
+  - id: route-anomaly-then-policy
+    category: routing
+    question: Is Engineering spending in AUG-2025 anomalous, and what approval does policy require?
+    expect_tools: [ACME_ANOMALY_TOOL, ACME_RAG_TOOL]
+    forbid_tools: [ACME_FORECAST_TOOL]
+    known_failure: true
+    comment: >
+      Documented defect: this reaches the forecast tool instead of the anomaly
+      tool. The task instruction lists forecasting and anomaly detection in
+      adjacent sentences and the model picks the wrong one. Tracked here so a
+      fix is provable, and so it cannot be mistaken for a new regression.

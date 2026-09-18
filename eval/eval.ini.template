@@ -1,0 +1,23 @@
+# Copy to eval.ini and fill in. eval.ini is gitignored.
+# No passwords live here — see [secrets] below, or export
+# OCI_DB_PASSWORD_<USER> before running.
+
+[database]
+db_user       = DS_USER        ; you; your password authenticates the session
+target_schema = ACME_CORP      ; agent objects live here; blank to connect directly
+dsn           = <tns-alias>    ; e.g. acmedw_medium
+wallet_dir    = <full path to the unzipped ADB wallet directory>
+lib_dir       = <full path to Oracle Instant Client>
+
+[agent]
+team_name = ACME_ANALYST_TEAM
+
+[oci]
+config_file    = ~/.oci/config
+config_profile = DEFAULT
+
+# Optional. Vault secret holding each user's own login password, keyed by
+# username. Checked before the environment variables. Needs the oci SDK in the
+# interpreter you run with, and a policy allowing "read secret-bundles".
+[secrets]
+# DS_USER = ocid1.vaultsecret.oc1.<region>.<unique-id>

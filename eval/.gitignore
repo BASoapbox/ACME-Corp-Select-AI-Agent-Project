@@ -1,0 +1,4 @@
+eval.ini
+results/
+__pycache__/
+*.pyc

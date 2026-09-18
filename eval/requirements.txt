@@ -1,0 +1,8 @@
+# Oracle driver — THICK mode (wallet auth), so an Instant Client is also needed
+oracledb>=2.0.0
+
+# Test case definitions
+PyYAML>=6.0
+
+# Optional: read the login password from OCI Vault instead of the environment
+oci>=2.126.0
