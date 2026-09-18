@@ -133,12 +133,39 @@ one making something else worse:
 | Routing rules restated in the agent role as well | worst of all — lookups 0/5 |
 
 Naming "past periods" inside the forecast tool's own instruction, even to forbid
-them, made that tool match past-period questions. All of it was reverted, and
-the deployed instructions are the ones in `SA_03_agent_setup.sql`.
+them, made that tool match past-period questions. All of it was reverted.
+
+The revert itself then turned out to be incomplete, which is worth more than the
+defect. Restoring the tools rewrote each one from its `instruction` alone, so all
+four custom tools came back **without their `tool_inputs`** — the per-parameter
+descriptions. Every eval still passed, because no case asserts what the agent
+*is*. `check_drift.py` exists because of that, and is the check that found it.
 
 The defect is narrow: the anomaly tool does fire and the answer stays grounded,
 so the extra call is cosmetic. It is declared rather than chased — and the
 measurements above exist because each attempt was scored rather than eyeballed.
+
+---
+
+## Checking the deployed agent against the script
+
+The harness asserts what the agent *answers*. That is not the same as asserting
+what the agent *is*, and an agent can keep passing its evals while its deployed
+definition has drifted from the script in this repository.
+
+```bash
+python check_drift.py     # exit 1 if the database differs from SA_03
+```
+
+It reads every `CREATE_TOOL` / `CREATE_AGENT` / `CREATE_TASK` / `CREATE_TEAM`
+block in `SA_03_agent_setup.sql` and compares each declared attribute with
+`user_ai_agent_*_attributes`. Attributes present in the database but absent from
+the script are reported as notes rather than drift — Oracle supplies its own
+default `instruction` for the built-in `sql` and `rag` tool types, and derives
+the task's `tools` list from the agent.
+
+Run it before an eval run you intend to trust, and after any change made with
+`SET_ATTRIBUTE` rather than by re-running the script.
 
 ---
 
@@ -148,6 +175,7 @@ measurements above exist because each attempt was scored rather than eyeballed.
 python run_eval.py --only sql,rag     # one or more categories
 python run_eval.py --case refusal-empty-department
 python run_eval.py --no-store         # do not write to the database
+python check_drift.py                 # deployed agent vs. SA_03
 ```
 
 Results are also written to `results/<run_id>.json`, which is gitignored —

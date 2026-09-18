@@ -176,6 +176,10 @@ cases:
       the agent role was worse still. All were reverted. The defect is narrow
       and cosmetic in effect - the anomaly tool does fire and the answer is
       still grounded - so it is declared rather than chased.
+      Caveat on the 0/5: it was measured while all four custom tools were
+      deployed without their tool_inputs, which the revert had dropped and
+      check_drift.py later found. Re-measure once the deployment matches
+      SA_03 again before treating 0/5 as the shipped behaviour.
 
   - id: route-anomaly-then-policy
     category: routing
