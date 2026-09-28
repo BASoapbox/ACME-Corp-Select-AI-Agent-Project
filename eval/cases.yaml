@@ -176,19 +176,30 @@ cases:
       the agent role was worse still. All were reverted. The defect is narrow
       and cosmetic in effect - the anomaly tool does fire and the answer is
       still grounded - so it is declared rather than chased.
-      Caveat on the 0/5: it was measured while all four custom tools were
-      deployed without their tool_inputs, which the revert had dropped and
-      check_drift.py later found. Re-measure once the deployment matches
-      SA_03 again before treating 0/5 as the shipped behaviour.
+      The 0/5 was first measured while all four custom tools were deployed
+      without their tool_inputs, which the revert had dropped and
+      check_drift.py later found - so it was not a measurement of the shipped
+      agent at all. The deployment was realigned on 2026-09-28 and the case
+      re-measured: still 0/5. The defect is real and is not an artefact of
+      that drift.
 
   - id: route-anomaly-then-policy
     category: routing
     question: Is Engineering spending in AUG-2025 anomalous, and what approval does policy require?
     expect_tools: [ACME_ANOMALY_TOOL, ACME_RAG_TOOL]
-    repeat: 5
-    min_passes: 4
+    repeat: 10
+    min_passes: 6
     comment: >
-      Two-tool decomposition on the shipped instructions: both the anomaly tool
-      and the policy documents are reached, measured 5/5. Sampled five times
-      because it is the kind of case that degrades quietly when instructions
-      change.
+      Two-tool decomposition: both the anomaly tool and the policy documents
+      must be reached. Measured 34/40 (~85%) on 2026-09-28, on the deployment
+      that matches SA_03.
+      That number is a lesson in sample size. The first four runs of five gave
+      3,4,3,5 and looked like a regression from restoring tool_inputs; the next
+      two runs of ten gave 10/10 and 9/10. Same configuration, same questions,
+      twenty minutes apart. Wall time swung with it, 16s to 48s for the same
+      case, which points at load on the model endpoint rather than anything in
+      the agent. Do not read a config change out of one run of five.
+      Sampled ten deliberately: at rates in this range a 4-of-5 gate fails
+      often enough on a healthy agent to train you to re-run until it passes.
+      6-of-10 moves when the agent moves. Do not lower it to make a run go
+      green - raise the sample, or accept the finding.

@@ -141,9 +141,27 @@ four custom tools came back **without their `tool_inputs`** — the per-paramete
 descriptions. Every eval still passed, because no case asserts what the agent
 *is*. `check_drift.py` exists because of that, and is the check that found it.
 
-The defect is narrow: the anomaly tool does fire and the answer stays grounded,
-so the extra call is cosmetic. It is declared rather than chased — and the
+So the 0/5 above was never a measurement of the shipped agent. The deployment was
+realigned with `realign.py` on 2026-09-28 and the case re-measured: **still 0/5**.
+The defect is real, and is not an artefact of the drift.
+
+It is also narrow: the anomaly tool does fire and the answer stays grounded, so
+the extra call is cosmetic. It is declared rather than chased — and the
 measurements above exist because each attempt was scored rather than eyeballed.
+
+### What the same realign did to the numbers
+
+Restoring `tool_inputs` visibly widened the fan-out — the two-tool routing case
+now also reaches the SQL and forecast tools. The first four runs after it read
+3/5, 4/5, 3/5, 5/5 and looked like a clear regression. The next two runs of ten
+read 10/10 and 9/10. Same configuration, same questions, twenty minutes apart;
+wall time for the case swung from 16s to 48s alongside it, which points at load
+on the model endpoint rather than at anything in the agent.
+
+**One run of five is not a measurement.** The gate on that case is now 6 of 10
+rather than 4 of 5, because at the observed rate a 4-of-5 gate fails often enough
+on a healthy agent to teach you to re-run until it passes — which is the habit
+this harness exists to prevent.
 
 ---
 
@@ -167,6 +185,36 @@ the task's `tools` list from the agent.
 Run it before an eval run you intend to trust, and after any change made with
 `SET_ATTRIBUTE` rather than by re-running the script.
 
+`realign.py` closes what it finds, for tools, by recreating each drifted tool
+from the attributes the script declares:
+
+```bash
+python realign.py            # show what would change, change nothing
+python realign.py --apply    # drop and recreate the drifted tools
+```
+
+A tool is dropped before it is recreated, so do not run it against an agent that
+is serving traffic. Drifted agents, tasks and teams are reported and left alone —
+recreating those re-forms the team's wiring, which is worth doing by hand.
+
+---
+
+## The scorer is code too
+
+```bash
+python test_refusal.py       # no database needed
+```
+
+The refusal pattern has been wrong four times, and every time in the same
+direction: it failed the agent for an answer that was correct. `$0` is a grounded
+answer when the query returned nothing. "had **no recorded** expenses" is a
+refusal that a pattern anchored on `no expenses` does not match.
+
+A scorer that is wrong does not report itself as broken — it accuses the thing it
+is measuring, and the accusation looks like a finding. `test_refusal.py` pins both
+directions: real refusals the agent has produced must read as refusals, and
+invented figures must not. Add a line to it *before* changing the pattern.
+
 ---
 
 ## Options
@@ -176,6 +224,8 @@ python run_eval.py --only sql,rag     # one or more categories
 python run_eval.py --case refusal-empty-department
 python run_eval.py --no-store         # do not write to the database
 python check_drift.py                 # deployed agent vs. SA_03
+python realign.py --apply             # redeploy drifted tools from SA_03
+python test_refusal.py                # unit-test the scorer, no database
 ```
 
 Results are also written to `results/<run_id>.json`, which is gitignored —
