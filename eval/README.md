@@ -145,9 +145,46 @@ So the 0/5 above was never a measurement of the shipped agent. The deployment wa
 realigned with `realign.py` on 2026-09-28 and the case re-measured: **still 0/5**.
 The defect is real, and is not an artefact of the drift.
 
-It is also narrow: the anomaly tool does fire and the answer stays grounded, so
-the extra call is cosmetic. It is declared rather than chased — and the
-measurements above exist because each attempt was scored rather than eyeballed.
+This section used to say the defect was cosmetic: *"the anomaly tool does fire
+and the answer stays grounded."* **That was wrong**, and the way it was wrong is
+the most useful thing in this file — see the next section.
+
+### What tool checks could not see
+
+Until 2026-10-13 both routing cases asserted only *which tools fired*. A
+confirmation run before publishing turned up an answer saying AUG-2025 spending
+was *"forecasted to be $34,880.56, which is not flagged as anomalous"* — the
+ledger holds $176,000, about 179% above average. Reading every answer by hand
+across that day's runs:
+
+**26 of 45 answers to this question were wrong (58%).** They give the forecast
+as the period's spending, deny the anomaly, dodge it ("for anomalous spending,
+policy requires…"), or say there is no data for a period with $176,000 in it.
+Many fired exactly the tools the case expected, and passed.
+
+Two things hid it for two weeks:
+
+- **No case looked at the answer.** The routing cases now do — a correct answer
+  states that the spending is anomalous, never denies it, never says there is no
+  data, and brings no forecast or predicted figure into a question about a period
+  already in the ledger. The patterns are in `cases.yaml`, and tested in
+  `test_routing_answers.py` against real answers in both directions.
+- **Only one answer per case was kept**, and for a passing case it was the first
+  *passing* attempt. Every attempt's answer is now in `results/<run_id>.json`
+  under `tries`, and a sampled case prints a tally of why its attempts failed.
+
+The deployment had not changed — `check_drift.py` was clean throughout — so this
+is either a change on the model side or something that was always there and
+never read. With one stored answer per case from September, there is no way to
+tell which.
+
+The answer checks were themselves wrong twice on the way, both times by passing
+wrong answers: the word "anomalous" in a dodge satisfied the first version, and
+"the predicted expense for AUG-2025 is $34,880.56" slipped past the second. The
+final version agrees with a hand reading of all 30 answers it was checked
+against. One rule in it is a judgement call, made on purpose: an answer with the
+right verdict that then reports a "discrepancy" against the forecast is failed,
+because a forecast has no place in that answer at all.
 
 ### What the same realign did to the numbers
 
@@ -162,6 +199,10 @@ on the model endpoint rather than at anything in the agent.
 rather than 4 of 5, because at the observed rate a 4-of-5 gate fails often enough
 on a healthy agent to teach you to re-run until it passes — which is the habit
 this harness exists to prevent.
+
+Those 34/40 were tool checks only. Which answers behind them were right was never
+recorded, so read them as "the right tools fired 85% of the time," not "the
+agent answered correctly 85% of the time."
 
 ---
 
@@ -202,7 +243,8 @@ recreating those re-forms the team's wiring, which is worth doing by hand.
 ## The scorer is code too
 
 ```bash
-python test_refusal.py       # no database needed
+python test_refusal.py           # no database needed
+python test_routing_answers.py   # no database needed
 ```
 
 The refusal pattern has been wrong four times, and every time in the same
@@ -215,6 +257,11 @@ is measuring, and the accusation looks like a finding. `test_refusal.py` pins bo
 directions: real refusals the agent has produced must read as refusals, and
 invented figures must not. Add a line to it *before* changing the pattern.
 
+`test_routing_answers.py` does the same for the routing answer checks, and reads
+their patterns straight from `cases.yaml` so the two cannot disagree. Those
+checks failed in the opposite direction — passing wrong answers — which is the
+quieter failure: nothing goes red.
+
 ---
 
 ## Options
@@ -226,6 +273,7 @@ python run_eval.py --no-store         # do not write to the database
 python check_drift.py                 # deployed agent vs. SA_03
 python realign.py --apply             # redeploy drifted tools from SA_03
 python test_refusal.py                # unit-test the scorer, no database
+python test_routing_answers.py        # unit-test the routing answer checks
 ```
 
 Results are also written to `results/<run_id>.json`, which is gitignored —

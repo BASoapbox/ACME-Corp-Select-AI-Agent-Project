@@ -163,6 +163,9 @@ cases:
     category: routing
     question: Is Engineering spending in AUG-2025 anomalous, and what approval does policy require?
     forbid_tools: [ACME_FORECAST_TOOL]
+    # Same answer checks as route-anomaly-then-policy below; see the comment there.
+    must_match: '(?i)\b(?:is|was|are|were|be)\b[^.]{0,40}?\banomal(?:ous|y)\b'
+    must_not_match: '(?i)\bforecast|\b(?:predicted|projected|expected|estimated)\b[^.]{0,40}?\$\s?\d|\bnot (?:been )?(?:flagged as |considered |deemed )?(?:an )?anomal|\bno (?:\w+\s+){0,2}(?:data|records?|transactions?)\b'
     repeat: 5
     min_passes: 5
     known_failure: true
@@ -173,9 +176,13 @@ cases:
       and every one made something else worse: naming "past periods" inside the
       forecast tool's own instruction made it match past-period lookups
       (sql-sales-jun2025 went 5/5 to 0/5), and restating the routing rules in
-      the agent role was worse still. All were reverted. The defect is narrow
-      and cosmetic in effect - the anomaly tool does fire and the answer is
-      still grounded - so it is declared rather than chased.
+      the agent role was worse still. All were reverted, and the defect is
+      declared rather than chased.
+      It is NOT cosmetic. This comment used to say the answer stays grounded;
+      that was only ever checked on the one answer per case the harness kept.
+      On 2026-10-13, reading every answer: about 3 in 10 were wrong - the
+      forecast figure ($34,880.56) given as AUG-2025 spending, "not flagged as
+      anomalous", or "no data" for a period with $176,000 in the ledger.
       The 0/5 was first measured while all four custom tools were deployed
       without their tool_inputs, which the revert had dropped and
       check_drift.py later found - so it was not a measurement of the shipped
@@ -187,12 +194,31 @@ cases:
     category: routing
     question: Is Engineering spending in AUG-2025 anomalous, and what approval does policy require?
     expect_tools: [ACME_ANOMALY_TOOL, ACME_RAG_TOOL]
+    # The tool checks alone passed wrong answers: an answer quoting the forecast
+    # as AUG-2025 spending still fired both expected tools. A correct answer
+    # STATES that the spending is anomalous ("is ... anomalous" in one
+    # sentence - merely using the word, as in "for anomalous spending, policy
+    # requires...", is a dodge). It never denies the anomaly and never says
+    # there is no data.
+    # And it brings no forecast into it: no "forecast" at all, and no
+    # "predicted/projected/expected/estimated ... $figure". AUG-2025 is in the
+    # ledger, so a forecast for it means nothing - stating one as the spending
+    # is wrong, and so is reporting a "discrepancy" against it (judgement call,
+    # made on purpose; see test_routing_answers.py). "Predicted to be
+    # anomalous", with no figure, is allowed: loose wording, right verdict.
+    # Tested against real answers in test_routing_answers.py - change them
+    # there first. Earlier versions passed three wrong answers; every one is a
+    # fixture in that file.
+    must_match: '(?i)\b(?:is|was|are|were|be)\b[^.]{0,40}?\banomal(?:ous|y)\b'
+    must_not_match: '(?i)\bforecast|\b(?:predicted|projected|expected|estimated)\b[^.]{0,40}?\$\s?\d|\bnot (?:been )?(?:flagged as |considered |deemed )?(?:an )?anomal|\bno (?:\w+\s+){0,2}(?:data|records?|transactions?)\b'
     repeat: 10
     min_passes: 6
     comment: >
       Two-tool decomposition: both the anomaly tool and the policy documents
       must be reached. Measured 34/40 (~85%) on 2026-09-28, on the deployment
-      that matches SA_03.
+      that matches SA_03 - but with tool checks only; the answers were never
+      read. With the answer checks above, 2026-10-13 measured 4/10, and 26 of
+      45 answers that day to this question were wrong.
       That number is a lesson in sample size. The first four runs of five gave
       3,4,3,5 and looked like a regression from restoring tool_inputs; the next
       two runs of ten gave 10/10 and 9/10. Same configuration, same questions,

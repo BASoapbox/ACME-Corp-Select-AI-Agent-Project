@@ -342,12 +342,20 @@ def main() -> int:
         if attempts > 1 and not passed:
             fails = [f"{len(good)}/{attempts} attempts passed, needed {need}"] + fails
 
+        # Every attempt is kept. The record below shows one answer, and for a
+        # passing case that is the first *passing* attempt -- which is how three
+        # wrong answers in ten sat behind a "34/40" for two weeks unread. The
+        # database keeps the one answer; results/<run_id>.json keeps them all.
         rec = {"id": merged["id"], "category": merged.get("category", ""),
                "question": merged["question"], "answer": shown["answer"],
                "passed": passed, "known_failure": bool(merged.get("known_failure")),
                "failures": fails, "elapsed_ms": max(t["ms"] for t in tries),
                "tools": shown["tools"], "team_exec_id": shown["eid"],
-               "truth": shown["truth"], "attempts": attempts, "pass_count": len(good)}
+               "truth": shown["truth"], "attempts": attempts, "pass_count": len(good),
+               "tries": [{"passed": not t["fails"], "failures": t["fails"],
+                          "answer": t["answer"], "tools": t["tools"],
+                          "elapsed_ms": t["ms"], "team_exec_id": t["eid"]}
+                         for t in tries]}
         results.append(rec)
 
         mark = "PASS" if passed else ("KNOWN" if rec["known_failure"] else "FAIL")
@@ -358,6 +366,14 @@ def main() -> int:
             for f in fails:
                 print(f"           → {f}")
             print(f"           answer: {shown['answer'][:150].replace(chr(10), ' ')}")
+        if attempts > 1 and len(good) < attempts and not args.quiet:
+            reasons: dict[str, int] = {}
+            for t in tries:
+                for f in t["fails"]:
+                    key = f.split(" (fired:")[0]
+                    reasons[key] = reasons.get(key, 0) + 1
+            for why, n in sorted(reasons.items(), key=lambda kv: -kv[1]):
+                print(f"           {n}/{attempts} attempts: {why}")
 
     passed = sum(1 for r in results if r["passed"])
     known  = sum(1 for r in results if r["known_failure"] and not r["passed"])
