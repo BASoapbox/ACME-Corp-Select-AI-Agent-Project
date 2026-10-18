@@ -233,8 +233,17 @@ BEGIN
 END;
 /
 
--- Test that token refresh works with new password
-SELECT acme_python_expense_analysis('Engineering', 30) AS test_result FROM dual;
+-- Test that token refresh works with new password.
+-- Call it from PL/SQL, not SELECT: pyqSetAuthToken writes to the database,
+-- which is not allowed inside a query (ORA-14551).
+SET SERVEROUTPUT ON SIZE UNLIMITED
+DECLARE
+    v_result CLOB;
+BEGIN
+    v_result := acme_python_expense_analysis('Engineering', 30);
+    DBMS_OUTPUT.PUT_LINE(DBMS_LOB.SUBSTR(v_result, 4000, 1));
+END;
+/
 -- Expected: JSON result without error — confirms new password works
 
 -- ============================================================================

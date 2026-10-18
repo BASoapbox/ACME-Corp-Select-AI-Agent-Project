@@ -629,8 +629,17 @@ SELECT object_name, object_type, status FROM user_objects
 WHERE  object_name = 'ACME_PYTHON_EXPENSE_ANALYSIS';
 -- Expected: VALID
 
--- Standalone test (no manual pyqSetAuthToken needed — wrapper handles it)
-SELECT acme_python_expense_analysis('Engineering', 30) AS result FROM dual;
+-- Standalone test (no manual pyqSetAuthToken needed — wrapper handles it).
+-- Call it from PL/SQL, not SELECT: pyqSetAuthToken writes to the database,
+-- which is not allowed inside a query (ORA-14551).
+SET SERVEROUTPUT ON SIZE UNLIMITED
+DECLARE
+    v_result CLOB;
+BEGIN
+    v_result := acme_python_expense_analysis('Engineering', 30);
+    DBMS_OUTPUT.PUT_LINE(DBMS_LOB.SUBSTR(v_result, 4000, 1));
+END;
+/
 -- Expected: JSON with mean=$63,055.56, std_dev=$42,667.61, peak=AUG-2025
 
 -- ============================================================================
