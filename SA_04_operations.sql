@@ -12,7 +12,7 @@
     1.  Change the LLM model
     2.  Update agent role
     3.  Update task instruction (tool routing)
-    4.  Update OML password (when ^agent_schema. password changes)
+    4.  After the ^agent_schema. password changes (Vault check + test)
     5.  Add a new table to the NL2SQL profile
     6.  Update table or column comments
     7.  Rebuild agent stack only (preserves profiles, tools, vector index)
@@ -29,10 +29,6 @@
 */
 
 @SA_ENV
-
--- Section 4 needs the NEW schema password. Prompted, never stored.
--- Press Enter to skip if you are not running Section 4.
-ACCEPT new_pw CHAR PROMPT 'New password for ^agent_schema. (Enter to skip): ' HIDE
 
 
 -- ============================================================================
@@ -213,29 +209,29 @@ FROM   user_ai_agent_task_attributes
 WHERE  task_name = '^task_name.' AND attribute_name = 'instruction';
 
 -- ============================================================================
--- SECTION 4: UPDATE OML PASSWORD (when ^agent_schema. password changes)
+-- SECTION 4: AFTER THE ^agent_schema. PASSWORD CHANGES
 -- ============================================================================
--- The ^oml_credential. credential stores the ^agent_schema. password for OML token
--- auto-refresh. Run this block whenever the ^agent_schema. DB password is changed.
+-- Nothing in the database stores the ^agent_schema. password. The Python tool
+-- reads it from OCI Vault (^vault_secret_ocid.) on every call, so there is no
+-- credential to update here.
+--
+-- What matters is that the database password and the Vault secret change
+-- together. Change the password and add the new value as a new version of the
+-- same secret in one step (a rotation tool that updates both is safest). If
+-- they drift, the next Python tool call cannot get an OML token and logs the
+-- failure to ^error_log_table. (Section 9).
+--
+-- Then run the two checks below as ^agent_schema..
 -- ============================================================================
 
-BEGIN
-    BEGIN
-        DBMS_CLOUD.DELETE_CREDENTIAL(credential_name => '^oml_credential.');
-    EXCEPTION WHEN OTHERS THEN NULL;
-    END;
+-- 1. The database can read the secret (prints OK, never the password)
+SELECT CASE WHEN acme_get_secret('^vault_secret_ocid.') IS NOT NULL
+            THEN 'OK' ELSE 'FAILED' END AS vault_read FROM dual;
+-- Expected: OK
 
-    DBMS_CLOUD.CREATE_CREDENTIAL(
-        credential_name => '^oml_credential.',
-        username        => '^agent_schema.',
-        password        => '^new_pw.'
-    );
-END;
-/
-
--- Test that token refresh works with new password.
--- Call it from PL/SQL, not SELECT: pyqSetAuthToken writes to the database,
--- which is not allowed inside a query (ORA-14551).
+-- 2. The token refresh works with the new password. Call it from PL/SQL, not
+--    SELECT: pyqSetAuthToken writes to the database, which is not allowed
+--    inside a query (ORA-14551).
 SET SERVEROUTPUT ON SIZE UNLIMITED
 DECLARE
     v_result CLOB;
@@ -244,7 +240,7 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE(DBMS_LOB.SUBSTR(v_result, 4000, 1));
 END;
 /
--- Expected: JSON result without error — confirms new password works
+-- Expected: JSON result without error, and no new rows in ^error_log_table.
 
 -- ============================================================================
 -- SECTION 5: ADD A TABLE TO THE NL2SQL PROFILE
@@ -453,9 +449,9 @@ ORDER  BY object_name;
 -- Python script
 SELECT name, cdate FROM user_pyq_scripts WHERE name = 'acme_py_expense_stats';
 
--- OML credential
-SELECT credential_name, username, enabled FROM user_credentials
-WHERE  credential_name = '^oml_credential.';
+-- Vault access for the Python tool (prints OK, never the password)
+SELECT CASE WHEN acme_get_secret('^vault_secret_ocid.') IS NOT NULL
+            THEN 'OK' ELSE 'FAILED' END AS vault_read FROM dual;
 
 -- Agent stack
 SELECT agent_name,      status FROM user_ai_agents      ORDER BY agent_name;
@@ -486,9 +482,10 @@ FETCH  FIRST 10 ROWS ONLY;
 -- SECTION 11: MANUAL OML TOKEN SET (fallback only)
 -- ============================================================================
 -- The wrapper function auto-refreshes the token on every call (Section 8 of
--- SA_02). This section is a fallback only — use it if:
+-- SA_03). This section is a fallback only — use it if:
 --   a) You see OML auth errors and want to test the token directly
---   b) ^oml_credential. is not yet set up and you need a quick fix
+--   b) the database cannot read the password from Vault and you need a
+--      quick fix while you sort out the policy
 --
 -- STEP A: Get a token from your terminal:
 /*

@@ -78,12 +78,9 @@ DEFINE oml_base_url     = "https://XXXXXXXXXXXX-YOURDBNAME.adb.^region..oraclecl
 
 -- OCI Vault secret holding the schema password. The database fetches this
 -- itself at run time via Resource Principal, so no password is ever stored in
--- these scripts. Needs: allow any-user to read secret-bundles in compartment <c>
---                       where request.principal.type = 'autonomousdatabase'
+-- these scripts. Needs an IAM policy scoped to your database and this one
+-- secret; SA_03 Section 2 shows the statement and checks the access.
 DEFINE vault_secret_ocid = "ocid1.vaultsecret.oc1.REPLACE_ME"
-
--- DBMS_CLOUD credential holding the schema password, used by the Python tool.
-DEFINE oml_credential   = "ACME_OML_CRED"
 
 -- ── Object names ─────────────────────────────────────────────────────────────
 -- Change the prefix to rebrand the whole stack in one place.

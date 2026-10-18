@@ -18,7 +18,7 @@
     ^compartment_ocid.  — compartment OCID (see SA_ENV.sql)
     ^oml_base_url.      — ADW OML endpoint e.g.
                                https://xxxx-yourdbname.^oml_root_domain.
-    ^schema_pw. — ^agent_schema. database password
+    ^vault_secret_ocid. — Vault secret holding the ^agent_schema. password
 
   CHANGES FROM PREVIOUS VERSION:
     - Tables and data moved to SA_00_DDL_DML.sql (this file starts at profiles)
@@ -26,13 +26,14 @@
     - NL2SQL profile object_list includes ACME_CHAT_SESSIONS and ACME_CHAT_MESSAGES
     - Agent role updated to reference all 6 tools explicitly
     - OML token refresh is now automated inside acme_python_expense_analysis()
-      (Option 2) — ^oml_credential. credential stores the password; the wrapper
-      fetches a fresh token on every call — no manual pyqSetAuthToken needed
+      (Option 2) — the wrapper reads the password from OCI Vault and fetches
+      a fresh token on every call — no manual pyqSetAuthToken needed, and no
+      stored copy of the password to update when it changes
     - ACME_ERROR_LOG table used to log token refresh failures silently
 
   SECTIONS:
     1.  Table and column comments (NL2SQL hallucination guard)
-    2.  OML credential setup (one-time — enables auto token refresh)
+    2.  Check Vault access (the Python tool reads the password from Vault)
     3.  Create NL2SQL profile (ACME_NL2SQL_PROFILE)
     4.  Create RAG profile (ACME_RAG_PROFILE)
     5.  Create vector index (ACME_VECTOR_INDEX)
@@ -50,10 +51,6 @@
 @SA_ENV
 
 WHENEVER SQLERROR CONTINUE
-
--- The Python tool needs the schema password to refresh its OML token.
--- Prompted here, never stored. Press Enter to skip if you are not using it.
-ACCEPT schema_pw CHAR PROMPT 'Password for ^agent_schema. (Enter to skip Python tool): ' HIDE
 
 
 -- ============================================================================
@@ -106,36 +103,40 @@ COMMENT ON COLUMN acme_period_close.status IS
     'Task status. Valid values: OPEN (not started), IN_PROGRESS (underway), COMPLETE (finished). Use to filter for outstanding or completed close tasks.';
 
 -- ============================================================================
--- SECTION 2: OML CREDENTIAL SETUP (one-time, enables auto token refresh)
+-- SECTION 2: CHECK VAULT ACCESS (the Python tool reads the password from Vault)
 -- ============================================================================
--- Stores the ^agent_schema. password securely so the Python wrapper function can
--- auto-refresh the OML auth token on every call (Option 2 token strategy).
--- This eliminates the need to manually run pyqSetAuthToken every 60 minutes.
+-- The Python tool needs the ^agent_schema. password to refresh its OML token.
+-- It is never stored in the database or in these scripts: the wrapper in
+-- Section 8 reads it from OCI Vault (^vault_secret_ocid.) on every call, using
+-- the database's own Resource Principal. Earlier versions kept a copy in a
+-- DBMS_CLOUD credential; that copy went stale whenever the password changed.
 --
--- Replace ^schema_pw. with the actual ^agent_schema. DB password.
--- If the password changes, re-run this block to update the credential.
+-- This block only proves the database can read the secret. It prints the HTTP
+-- status, never the value. Fix a failure here before Section 8.
+-- Requires: allow any-user to read secret-bundles in compartment <c>
+--           where all {request.principal.type = 'autonomousdatabase',
+--                      request.principal.id = '<your ADW OCID>',
+--                      target.secret.name = '<this secret's name>'}
+--           Scope it to your database and this one secret: without the last
+--           two conditions, every Autonomous Database in the tenancy can read
+--           every secret in the compartment.
 -- ============================================================================
 
+SET SERVEROUTPUT ON SIZE UNLIMITED
+DECLARE
+    v_resp DBMS_CLOUD_TYPES.resp;
 BEGIN
-    -- Drop if exists (safe re-run)
-    BEGIN
-        DBMS_CLOUD.DROP_CREDENTIAL(credential_name => '^oml_credential.');
-    EXCEPTION WHEN OTHERS THEN NULL;
-    END;
-
-    DBMS_CLOUD.CREATE_CREDENTIAL(
-        credential_name => '^oml_credential.',
-        username        => '^agent_schema.',
-        password        => '^schema_pw.'
-    );
+    v_resp := DBMS_CLOUD.SEND_REQUEST(
+        credential_name => 'OCI$RESOURCE_PRINCIPAL',
+        uri             => 'https://secrets.vaults.^region..oci.oraclecloud.com'
+                        || '/20190301/secretbundles/^vault_secret_ocid.',
+        method          => 'GET');
+    DBMS_OUTPUT.PUT_LINE('Vault read OK (HTTP '
+        || DBMS_CLOUD.GET_RESPONSE_STATUS_CODE(v_resp) || ')');
 END;
 /
-
--- Verify credential exists
-SELECT credential_name, username, enabled
-FROM   user_credentials
-WHERE  credential_name = '^oml_credential.';
--- Expected: ^oml_credential. | ^agent_schema. | TRUE
+-- Expected: Vault read OK (HTTP 200)
+-- ORA-20404 Object not found: wrong OCID, or the policy above is missing.
 
 -- ============================================================================
 -- SECTION 3: CREATE NL2SQL PROFILE (ACME_NL2SQL_PROFILE)
@@ -482,11 +483,11 @@ SELECT name FROM user_pyq_scripts WHERE name = 'acme_py_expense_stats';
 -- SECTION 8: PL/SQL WRAPPER WITH AUTO TOKEN REFRESH
 -- ============================================================================
 -- Token strategy: Option 2 — the wrapper fetches a fresh OML token on every
--- call using DBMS_CLOUD.SEND_REQUEST + the ^oml_credential. credential created
--- in Section 2. This eliminates manual pyqSetAuthToken() entirely.
+-- call, using a password read from OCI Vault (Section 2 checks that access).
+-- This eliminates manual pyqSetAuthToken() entirely.
 --
 -- Flow:
---   1. Retrieve stored password from ^oml_credential.
+--   1. Read the ^agent_schema. password from Vault (acme_get_secret)
 --   2. POST to OML token endpoint → extract accessToken
 --   3. Call pyqSetAuthToken(v_token)
 --   4. Query GL data → JSON string
@@ -502,8 +503,7 @@ SELECT name FROM user_pyq_scripts WHERE name = 'acme_py_expense_stats';
 -- Fetch a secret from OCI Vault using the database's own Resource Principal.
 -- This removes the need to hardcode a password in PL/SQL: DBMS_CLOUD credentials
 -- cannot be read back (by design), but the Vault REST API can be called directly.
--- Requires: allow any-user to read secret-bundles in compartment <c>
---           where request.principal.type = 'autonomousdatabase'
+-- Requires the policy shown in Section 2.
 CREATE OR REPLACE FUNCTION acme_get_secret(p_secret_ocid IN VARCHAR2)
 RETURN VARCHAR2 IS
     v_resp DBMS_CLOUD_TYPES.resp;
@@ -841,9 +841,9 @@ SELECT agent_name,      status FROM user_ai_agents      ORDER BY agent_name;
 SELECT task_name,       status FROM user_ai_agent_tasks ORDER BY task_name;
 SELECT agent_team_name, status FROM user_ai_agent_teams ORDER BY agent_team_name;
 
--- 11.7 OML credential
-SELECT credential_name, username, enabled FROM user_credentials
-WHERE  credential_name = '^oml_credential.';
+-- 11.7 Vault access for the Python tool (prints OK, never the password)
+SELECT CASE WHEN acme_get_secret('^vault_secret_ocid.') IS NOT NULL
+            THEN 'OK' ELSE 'FAILED' END AS vault_read FROM dual;
 
 -- ============================================================================
 -- SECTION 12: END-TO-END TESTS

@@ -9,17 +9,18 @@ version: 2
 #
 # is a *variable reference*, not a credential — the value is supplied at run
 # time from SA_ENV.sql, which is gitignored and never committed. The generic
-# password detector cannot tell the two apart, so the match below is recorded
-# as an accepted false positive rather than silenced with SKIP=ggshield.
+# password detector cannot tell the two apart. If it flags one, record that
+# match under secret.ignored_matches as an accepted false positive rather than
+# silencing the scan with SKIP=ggshield.
+#
+# The one such match recorded here (SA_03's '^schema_pw.') was removed when the
+# scripts stopped handling the schema password at all: the database reads it
+# from OCI Vault instead.
 #
 # No real password, key, OCID or token belongs in this repository. If a new
 # finding appears, check it properly before adding it here.
 
 secret:
-  ignored_matches:
-    - name: "SA_03_agent_setup.sql — SQLcl substitution variable '^schema_pw.', not a credential"
-      match: 8ead63573ec3dae4dbffebd5aeeb171c1753eb3f8e158ed3f1fa04e1cd5b41f0
-
   ignored_paths:
     # Local, gitignored config that holds real values. Listed defensively so a
     # stray copy is never scanned or committed.

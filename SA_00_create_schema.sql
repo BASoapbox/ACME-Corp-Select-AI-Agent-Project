@@ -39,8 +39,8 @@ ACCEPT new_schema CHAR DEFAULT '^agent_schema.' PROMPT 'Schema to create [^agent
 -- read it. Typing the password here AND storing it in Vault separately gives
 -- you two copies that can silently drift apart.
 --
--- Requires: allow any-user to read secret-bundles in compartment <c>
---           where request.principal.type = 'autonomousdatabase'
+-- Requires the Vault policy shown in SA_03 Section 2 (scoped to your database
+-- and this one secret).
 ACCEPT acme_pw CHAR PROMPT 'Password for ^new_schema. (Enter to read from Vault): ' HIDE
 
 -- ============================================================================
